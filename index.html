@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <!-- Give the page a title -->
+  <title>Dust Bowl Migration</title>
+  <!-- Add a link to the Leaflet CSS library so you can reference it for styling your map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.8.0/dist/leaflet.css" />
+  <!-- All the CSS code goes inside the style tags below -->
+  <style>
+    /* style the body */
+    body {
+      margin: 0px;
+      height: 100%;
+      width: 100%;
+    }
+
+    /* style header */
+    header {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      width: 447px;
+      height: 50px;
+      background-color: rgba(255, 255, 255, 1.0);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+      border-radius: 3px;
+      z-index: 800;
+    }
+
+    /* the text inputs */
+    h1 {
+      color: black;
+      font-size: 18px;
+      display: inline-block;
+      margin-top: 0.25em;
+      margin-bottom: 0.0em;
+      margin-left: 0.5em;
+      margin-right: 0;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      font-size: 12px;
+      color: black;
+      display: inline-block;
+      margin-top: 0.0em;
+      margin-bottom: 0.0em;
+      margin-left: 0.75em;
+      margin-right: 0;
+      font-weight: normal;
+    }
+
+    /* style the map */
+    #map {
+      position: absolute;
+      width: 100%;
+      top: 0px;
+      bottom: 0;
+    }
+
+    /* style the icon */
+    .animated-icon {
+      width: 20px;
+      height: 20px;
+      background-color: rgba(255, 255, 0, 1.0);
+      border-radius: 50%;
+      box-shadow: 0px 0px 4px lightyellow;
+    }
+
+    /* define legend styles */
+    .legend {
+      line-height: 18px;
+      color: #555;
+      padding: 6px 8px;
+      background-color: rgba(255, 255, 255, 0.9);
+    }
+
+    .legend i {
+      width: 18px;
+      height: 18px;
+      float: left;
+      margin-right: 8px;
+      opacity: 0.7;
+    }
+
+    /* the zoom control */
+    .leaflet-top {
+      bottom: 0;
+    }
+
+    .leaflet-top .leaflet-control-zoom {
+      top: 60px;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- header -->
+  <header>
+    <h1>Dust Bowl Outmigration, 1920 - 1930</h1><br>
+    <h2>Map by Jay Bowen; Data courtesy of IPUMS</h2>
+  </header>
+  <!-- the map -->
+  <div id="map"></div>
+  <!-- Add a link to the Leaflet JavaScript library so you can reference it for building your map -->
+  <script src="https://unpkg.com/leaflet@1.8.0/dist/leaflet.js"></script>
+  <!-- Add a link to the jQuery JavaScript library so you can leverage ajax methods to load your data -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <!-- Add the MovingMarker.js library here -->
+  <script src="src/MovingMarker.js"></script>
+  <!-- All JavaScript goes inside the script tags below -->
+  <script>
+    // define map options
+    const mapOptions = {
+      center: [39, -97], // center the map on the coordinates for the Lower 48
+      zoom: 5, // set the initial zoom
+    };
+
+    // define the map with the options above
+    const map = L.map("map", mapOptions);
+
+    // create a map pane for the labels
+    map.createPane('labels');
+    // give it a z index of 600 (this keeps it over the map layers, but under the tooltip)
+    map.getPane('labels').style.zIndex = 600;
+    // disable pointer events on the labels pane so that the map layers underneath register them instead
+    map.getPane('labels').style.pointerEvents = 'none';
+
+    // define an empty feature group to hold the migrant markers
+    const migrantMarkers = L.featureGroup().addTo(map);
+
+    // Add a function to style the counties by number of migrants
+    function getColor(d) {
+      return d > 374 ? '#bd0026' :
+        d > 218 ? '#f03b20' :
+        d > 88 ? '#fd8d3c' :
+        d > 26 ? '#fecc5c' :
+        d > 0 ? '#ffffb2' :
+        'rgba(0,0,0,0.0)'; // supported by Microsoft Edge
+    };
+
+    // add a base map to the map
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 20
+    }).addTo(map);
+
+    // add labels as a separate layer
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      pane: 'labels',
+      subdomains: 'abcd',
+      maxZoom: 20
+    }).addTo(map);
+
+    // Add a scale bar
+    L.control.scale({
+      position: 'bottomleft' // Position the scale bar at the bottom-left corner
+    }).addTo(map);
+
+    // use jquery to load migration GeoJSON data
+    $.when(
+      $.getJSON("data/destination-counties-1930.geojson"),
+      $.getJSON("data/migration-arrows-1920-1930.geojson"),
+      // when the files are done loading,
+      // identify them with names and process them through a function
+    ).done(function(destCounties1930, arrows1930) {
+      // initiate a leaflet GeoJSON layer with L.geoJson, feed it the counties data, and add to the map
+      const counties1930 = L.geoJson(destCounties1930, {
+        // style the layer
+        style: function(feature) {
+          return {
+            fillColor: getColor(feature.properties["migrant-totals"]), // return the polygon fill color defined by the getColor() function
+            fillOpacity: 0.7, // give the polygon fill a 70% opacity
+            color: "black",
+            weight: 0.50, // give the outline a weight
+            opacity: 1.0 // give the outline 100% opacity
+          };
+        },
+        // iterate through each feature
+        onEachFeature: function(feature, layer) {
+          // on mouseover...
+          layer.on("mouseover", function() {
+            // reset the layer's style
+            layer.setStyle({
+              fillOpacity: 1.0,
+              opacity: 1.0
+            })
+          });
+          // on mouseout...
+          layer.on("mouseout", function() {
+            // return the layer to the original style
+            layer.setStyle({
+              fillOpacity: 0.7,
+              opacity: 1.0
+            })
+          });
+          // bind tooltip content to each layer
+          layer.bindTooltip("Jurisdiction: " + feature.properties["NHGISNAM"] + ", " + feature.properties["STATENAM"] + "<br>" +
+            "Migrants from Dust Bowl Counties: " + feature.properties["migrant-totals"]).openTooltip();
+        }
+      }).addTo(map);
+      // initiate a leaflet GeoJSON layer with L.geoJson, feed it the migration arrows data, and add to the map
+      const migration1930 = L.geoJson(arrows1930, {
+        // Style the layer
+        style: function(feature) {
+          return {
+            color: '#1E3A51',
+            weight: 0,
+            opacity: 0.75
+          };
+        },
+        // iterate through each feature
+        onEachFeature: function(feature, layer) {
+          // get the migrant totals for each line
+          const totals = layer.feature.properties["migrant-totals"];
+          // get the array of all coordinates (in original lng,lat format)
+          const initLatLngs = layer.feature.geometry.coordinates;
+          // create an empty array into which you will push reversed coordinates in lat,lng format
+          const reversedLatLngs = [];
+          // for each coordinate in initLatLngs...
+          for (var i = 0; i < initLatLngs.length; i++) {
+            //...switch from lng,lat to lat,lng format and push to reversedLatLngs array
+            reversedLatLngs.push([initLatLngs[i][1], initLatLngs[i][0]]);
+          };
+          // create marker icon with L.divIcon
+          const customIcon = L.divIcon({
+            iconSize: [3, 3],
+            className: 'animated-icon my-icon-id'
+          });
+          // define the moving markers with the reversedLatLngs and a dynamic speed
+          const movingMarkers = L.Marker.movingMarker(reversedLatLngs, 10000 * (Math.log(totals) / totals));
+
+          // set counter to 0
+          var x = 0;
+          // create a loop function
+          function myLoop() {
+            // call a timeout when the loop is called
+            setTimeout(function() {
+              // moving marker action codes here
+              // set the moving marker to the custom icon
+              movingMarkers.setIcon(customIcon);
+              // add the markers to the migrantMarkers feature group
+              movingMarkers.addTo(migrantMarkers);
+              // start the markers
+              movingMarkers.start();
+              // increment the counter
+              x++;
+              // if the counter is less than the migrant totals + 1...
+              if (x < totals + 1) {
+                // trigger another loop
+                myLoop();
+              } else {
+                // otherwise, remove the marker from the migrantMarkers feature group
+                migrantMarkers.removeLayer(movingMarkers);
+              }
+              // set the timeout dynamically
+            }, 10000 / (totals / Math.log(totals)) + 1000 / totals);
+          };
+          // call the loop function
+          myLoop();
+
+          // listen for the addition of a layer with the layer control
+          map.on('overlayadd', function(event) {
+            // if the layer is the "Migrants" layer...
+            if (event.name == "Migrants") {
+              // set counter to 0
+              var x = 0;
+              // recreate the loop function
+              function myLoop() {
+                // call a timeout when the loop is called
+                setTimeout(function() {
+                  // moving marker action codes here
+                  // set the moving marker to the custom icon
+                  movingMarkers.setIcon(customIcon);
+                  // add the markers to the migrantMarkers feature group
+                  movingMarkers.addTo(migrantMarkers);
+                  // start the markers
+                  movingMarkers.start();
+                  // increment the counter
+                  x++;
+                  // if the counter is less than the migrant totals + 1...
+                  if (x < totals + 1) {
+                    // trigger another loop
+                    myLoop();
+                  } else {
+                    // otherwise, remove the marker from the migrantMarkers feature group
+                    migrantMarkers.removeLayer(movingMarkers);
+                  }
+                  // set the timeout dynamically
+                }, 10000 / (totals / Math.log(totals)) + 1000 / totals);
+              };
+              // call the loop function
+              myLoop();
+            }
+          });
+        }
+      }).addTo(map);
+
+      // define the collection of layers added to the map
+      const overlays = {
+        "Migrants": migrantMarkers, // migrantMarkers, as defined above
+        "Destination Counties": counties1930 // counties1930, as defined above
+      };
+
+      // define the layer control and feed it the layer collection defined above
+      const layerControl = L.control.layers(null, overlays, {
+        collapsed: false
+      }).addTo(map); // leave the spot for basemaps 'null' and keep the control open by default
+
+      // define a Leaflet control for the legend and position it at the bottom-right corner of the map
+      const legend = L.control({
+        position: 'bottomright'
+      });
+
+      // add content to the legend
+      legend.onAdd = function(map) {
+        // define a div inside the legend
+        const div = L.DomUtil.create('div', 'info legend'),
+          // in addition to grades corresponding to our choropleth ranges
+          grades = [0, 26, 88, 218, 374];
+        // append a title to the div in the legend
+        div.innerHTML += '<b>County Migration Totals<b><br><br>';
+        // loop through our migrant total intervals and generate a label with a colored square for each interval
+        for (var i = 0; i < grades.length; i++) {
+          div.innerHTML +=
+            '<i style="background:' + getColor(grades[i] + 1) + '"></i> ' +
+            (grades[i] + 1) + (grades[i + 1] ? '&ndash;' + grades[i + 1] + '<br>' : '+');
+        }
+        // append an explanation of what the moving dots represent
+        div.innerHTML += '<br><br>Each dot represents one migrant'
+        // return the div
+        return div;
+      };
+      // add the legend to the map
+      legend.addTo(map);
+
+    });
+  </script>
+</body>
+
+</html>
